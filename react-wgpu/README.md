@@ -1,46 +1,41 @@
-# Getting Started with Create React App
+# WebGPU on React (sample for learning)
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+* TypeScript を使ってブラウザ上で WebGPU を動かすサンプルです。
+* React を使っていますが、WebGPU は React とは何の関係もありません。単に動作確認の環境として React を使っただけで、それ以上の意味はありません。
 
-## Available Scripts
+## Chrome Canary
+1. WebGPU は正式版の Chrome では動きません。 開発版である Chrome Canary をダウンロードしましょう。
+2. さらに `chrome://flags/#enable-unsafe-webgpu` を開いて WebGPU を enable します。
 
-In the project directory, you can run:
+## React project setting
 
-### `npm start`
+このプロジェクトを作成した過程。
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+まず `create-react-app` で React プロジェクトを作成。TypeScript を使いたいので `--template TypeScript` を付けます。
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+```
+$ npx create-react-app <name> --template typescript
+```
 
-### `npm test`
+WebGPU の機能を使うにあたって、TypeScript の型定義をインストールしておくと便利です。
+まず npm で `@webgpu/types` を入れます。
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```
+$ npm install --save-dev @webgpu/types 
+```
+続いて、tsconfig.json に次のように `typeRoots` の設定を書き加えます。
 
-### `npm run build`
+```json
+{
+  "compilerOptions": {
+    ...
+    "typeRoots": [
+      "./node_modules/@webgpu/types",
+      "./node_modules/@types"
+    ]
+  },
+  ...
+}
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
-
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
-
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+以上で WebGPU の型定義が入ったはず。App.tsx などで `navigator.` と入力して、`navigator.gpu` がサジェストされるようになっていれば成功です。
