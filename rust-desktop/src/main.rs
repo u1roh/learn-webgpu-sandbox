@@ -4,10 +4,11 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
-pub async fn run() {
-    env_logger::init();
+fn main() {
+    pollster::block_on(run());
+}
 
+pub async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 

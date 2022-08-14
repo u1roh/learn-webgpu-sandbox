@@ -1,21 +1,19 @@
 [package]
-name = "tutorial"
+name = "rust-desktop"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+# [lib]
+# crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "rust-desktop"
-path = "src/main.rs"
+# [[bin]]
+# name = "rust-desktop"
+# path = "src/main.rs"
 
 [dependencies]
 bytemuck = { version = "1.11.0", features = ["derive"] }
-env_logger = "0.9.0"
-log = "0.4.17"
 pollster = "0.2.5"
 wgpu = "0.13.1"
 winit = "0.26.1"
