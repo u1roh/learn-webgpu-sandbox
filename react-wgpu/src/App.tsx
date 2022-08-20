@@ -61,20 +61,14 @@ async function compute() {
   console.log("end computation");
 }
 
-async function buildRenderingPipeline(canvas: HTMLCanvasElement, shaderCodeV: string, shaderCodeF: string) {
-  const adapter = await navigator.gpu.requestAdapter();
-  const device = await adapter?.requestDevice();
-  if (!adapter || !device) return;
-
-  const context = canvas.getContext('webgpu') as GPUCanvasContext;
-  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-  context.configure({
-    device,
-    format: presentationFormat,
-    alphaMode: "opaque"
-  });
-
-  const pipeline = device.createRenderPipeline({
+function buildRenderingPipeline(
+  device: GPUDevice,
+  format: GPUTextureFormat,
+  shaderCodeV: string,
+  shaderCodeF: string,
+  topology: GPUPrimitiveTopology
+) {
+  return device.createRenderPipeline({
     layout: "auto",
     vertex: {
       module: device.createShaderModule({ code: shaderCodeV }),
@@ -83,14 +77,12 @@ async function buildRenderingPipeline(canvas: HTMLCanvasElement, shaderCodeV: st
     fragment:{
       module: device.createShaderModule({ code: shaderCodeF }),
       entryPoint: "main",
-      targets: [{ format: presentationFormat }]
+      targets: [{ format }]
     },
     primitive: {
-      topology: "triangle-list"
+      topology,
     }
   });
-
-  return { context, device, pipeline }
 }
 
 function submitRenderPass(ctx: GPUCanvasContext, device: GPUDevice, clearColor: GPUColor, renderPass: (pass: GPURenderPassEncoder) => void) {
@@ -108,7 +100,7 @@ function submitRenderPass(ctx: GPUCanvasContext, device: GPUDevice, clearColor: 
   device.queue.submit([encoder.finish()]);
 }
 
-async function createRenderer(canvas: HTMLCanvasElement) {
+function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
   const shaderCodeV = `
       @group(0) @binding(0)
       var<uniform> counter: f32;
@@ -133,10 +125,7 @@ async function createRenderer(canvas: HTMLCanvasElement) {
         return vec4<f32>(1.0, 0.5, 0.0, 1.0);
       }
     `
-  const renderer = await buildRenderingPipeline(canvas, shaderCodeV, shaderCodeF);
-  if (!renderer) return;
-  
-  const { context, device, pipeline } = renderer;
+  const pipeline = buildRenderingPipeline(device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-list");
 
   const uniformBuf = device.createBuffer({
     size: 4,
@@ -169,29 +158,52 @@ async function createRenderer(canvas: HTMLCanvasElement) {
 }
 
 
+function WebGPURenderCanvas(props: {
+  createRenderer: (device: GPUDevice, context: GPUCanvasContext) => (() => void)
+}) {
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  // const [init, setInit] = React.useState(false);
+
+  const [device, setDevice] = React.useState<GPUDevice>();
+  React.useEffect(() => {
+    (async () => {
+      const adapter = await navigator.gpu.requestAdapter();
+      const device = await adapter?.requestDevice();
+      setDevice(device);
+    })();
+  }, []);
+
+  React.useEffect(() => {
+    // if(canvasRef.current && !init && device) {
+    //   setInit(true);
+    if(canvasRef.current && device) {
+      const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
+      const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+      context.configure({
+        device,
+        format: presentationFormat,
+        alphaMode: "opaque"
+      });
+
+      const renderer = props.createRenderer(device, context);
+      setInterval(renderer, 20);
+      // requestAnimationFrame() を使うと何故か uniform buffer を使ったときに描画できなくなった
+      // requestAnimationFrame(renderer)
+    }
+  }, [canvasRef, props, device]);
+
+
+    return <canvas ref={canvasRef} width={600} height={600}/>
+}
+
 function App() {
   React.useEffect(() => {
     compute();
   }, []);
 
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const [init, setInit] = React.useState(false);
-  React.useEffect(() => {
-    if(canvasRef.current && !init) {
-      setInit(true);
-      // createRenderer(canvasRef.current).then(renderer => setRender(renderer));
-      createRenderer(canvasRef.current).then(renderer => {
-        if (renderer) setInterval(renderer, 20);
-
-        // requestAnimationFrame() を使うと何故か uniform buffer を使ったときに描画できなくなった
-        // if (renderer) requestAnimationFrame(renderer)
-      });
-    }
-  }, [canvasRef, init]);
-
   return (
     <div className="App">
-      <canvas ref={canvasRef} width={600} height={600}/>
+      <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/>
     </div>
   );
 }
