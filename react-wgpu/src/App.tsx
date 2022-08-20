@@ -78,7 +78,7 @@ async function createRenderer(canvas: HTMLCanvasElement) {
 
   const shaderV = device.createShaderModule({
     code: `
-      @group(0) @binding(1)
+      @group(0) @binding(0)
       var<uniform> counter: f32;
 
       @vertex
@@ -88,11 +88,11 @@ async function createRenderer(canvas: HTMLCanvasElement) {
           vec2<f32>(-0.5, -0.5),
           vec2<f32>(0.5, -0.5),
         );
-        return vec4<f32>(pos[i], 0.0, 1.0);
-        // let theta = counter * 3.14 / 18.0;
-        // let x = cos(theta) * pos[i].x - sin(theta) * pos[i].y;
-        // let y = sin(theta) * pos[i].x + cos(theta) * pos[i].y;
-        // return vec4<f32>(x, y, 0.0, 1.0);
+        // return vec4<f32>(pos[i], 0.0, 1.0);
+        let theta = counter * 3.14 / 72.0;
+        let x = cos(theta) * pos[i].x - sin(theta) * pos[i].y;
+        let y = sin(theta) * pos[i].x + cos(theta) * pos[i].y;
+        return vec4<f32>(x, y, 0.0, 1.0);
       }
     `
   });
@@ -100,7 +100,7 @@ async function createRenderer(canvas: HTMLCanvasElement) {
     code: `
       @fragment
       fn main() -> @location(0) vec4<f32> {
-        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        return vec4<f32>(1.0, 0.5, 0.0, 1.0);
       }
     `
   });
@@ -120,30 +120,29 @@ async function createRenderer(canvas: HTMLCanvasElement) {
     }
   });
 
-  // const uniformBuf = device.createBuffer({
-  //   size: 1,
-  //   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  // });
+  const uniformBuf = device.createBuffer({
+    size: 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  });
 
   let counter = 0;
 
-  // const bindGroupLayout = pipeline.getBindGroupLayout(0);
-  // const bindGroup = device.createBindGroup({
-  //   layout: bindGroupLayout,
-  //   entries: [{ binding: 1, resource: { buffer: uniformBuf } }]
-  // });
+  const bindGroupLayout = pipeline.getBindGroupLayout(0);
+  const bindGroup = device.createBindGroup({
+    layout: bindGroupLayout,
+    entries: [{ binding: 0, resource: { buffer: uniformBuf } }]
+  });
 
   function render() {
     if(!device) return;
-    // device.queue.writeBuffer(uniformBuf, 0, new Float32Array([counter++]).buffer);
+    device.queue.writeBuffer(uniformBuf, 0, new Float32Array([counter++]).buffer);
 
-    // console.log("render");
     const view = context.getCurrentTexture().createView();
 
     const encoder = device.createCommandEncoder();
     const colorAttachment: GPURenderPassColorAttachment = {
       view,
-      clearValue: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
+      clearValue: { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
       loadOp: "clear",
       storeOp: "store"
     };
@@ -151,23 +150,21 @@ async function createRenderer(canvas: HTMLCanvasElement) {
       colorAttachments: [colorAttachment],
     });
     pass.setPipeline(pipeline);
-    // pass.setBindGroup(0, bindGroup);
+    pass.setBindGroup(0, bindGroup);
     pass.draw(3, 1, 0, 0);
     pass.end();
 
     device.queue.submit([encoder.finish()]);
 
-    requestAnimationFrame(render);
+    // requestAnimationFrame(render);
   }
 
   return render
 }
-
 function App() {
   React.useEffect(() => {
     compute();
   }, []);
-
 
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [init, setInit] = React.useState(false);
@@ -176,29 +173,17 @@ function App() {
       setInit(true);
       // createRenderer(canvasRef.current).then(renderer => setRender(renderer));
       createRenderer(canvasRef.current).then(renderer => {
-        // if (renderer) setInterval(renderer, 100);
-        if (renderer) requestAnimationFrame(renderer)
+        if (renderer) setInterval(renderer, 20);
+
+        // requestAnimationFrame() を使うと何故か uniform buffer を使ったときに描画できなくなった
+        // if (renderer) requestAnimationFrame(renderer)
       });
     }
   }, [canvasRef, init]);
 
   return (
     <div className="App">
-      <canvas ref={canvasRef} width={800} height={600}/>
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+      <canvas ref={canvasRef} width={600} height={600}/>
     </div>
   );
 }
