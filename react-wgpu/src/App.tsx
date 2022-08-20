@@ -1,11 +1,7 @@
 import React from 'react';
 import './App.css';
 
-async function compute() {
-  const adapter = await navigator.gpu.requestAdapter();
-  const device = await adapter?.requestDevice();
-  if (!adapter || !device) return;
-
+async function compute(device: GPUDevice) {
   const shader = device.createShaderModule({
     code: `
       @group(0) @binding(1)
@@ -59,6 +55,62 @@ async function compute() {
   const copied = new Float32Array(stagingBuf.getMappedRange(0, BUFFER_SIZE).slice(0));
   console.log(copied);
   console.log("end computation");
+}
+
+function genTexture(device: GPUDevice) {
+  const shader = device.createShaderModule({
+    code: `
+      @group(0) @binding(1) var output: texture_storage_2d<rgba8unorm, write>;
+
+      @compute @workgroup_size(16, 16)
+      fn main(
+        @builtin(global_invocation_id) global_id: vec3<u32>,
+        @builtin(local_invocation_id) local_id: vec3<u32>
+      ) {
+        let x = global_id.x * 16 + local_id.x;
+        let y = global_id.y * 16 + local_id.y;
+        textureStore(output, vec2<i32>(i32(x), i32(y)), vec4<f32>(f32(x) / 256.0, f32(y) / 256.0, 0.0, 1.0));
+      }
+    `
+  });
+  const pipeline = device.createComputePipeline({
+    layout: "auto",
+    compute: {
+      module: shader,
+      entryPoint: "main"
+    }
+  });
+
+  const IMAGE_SIZE = 256;
+
+  const texture = device.createTexture({
+    format: "rgba8unorm",
+    // format: "rgba32float",
+    size: [IMAGE_SIZE, IMAGE_SIZE],
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
+  });
+
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{ binding: 1, resource: texture.createView() }]
+  });
+
+  console.log("start computation");
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(IMAGE_SIZE / 16), Math.ceil(IMAGE_SIZE / 16));
+  pass.end();
+  // encoder.copyBufferToBuffer(outputBuf, 0, stagingBuf, 0, BUFFER_SIZE);
+  // device?.queue.submit([encoder.finish()]);
+
+  // await stagingBuf.mapAsync(GPUMapMode.READ, 0, BUFFER_SIZE);
+  // const copied = new Float32Array(stagingBuf.getMappedRange(0, BUFFER_SIZE).slice(0));
+  // console.log(copied);
+  console.log("end computation");
+  return texture;
 }
 
 function buildRenderingPipeline(
@@ -157,13 +209,58 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
   return render
 }
 
+function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
+  const shaderCodeV = `
+      struct VertexOutput {
+        @builtin(position) position: vec4<f32>,
+        @location(0) uv: vec2<f32>,
+      }
 
-function WebGPURenderCanvas(props: {
-  createRenderer: (device: GPUDevice, context: GPUCanvasContext) => (() => void)
-}) {
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  // const [init, setInit] = React.useState(false);
+      @vertex
+      fn main(@builtin(vertex_index) i : u32) -> VertexOutput {
+        let pos = array<vec2<f32>, 4>(
+          vec2<f32>(-1.0, -1.0),
+          vec2<f32>(1.0, -1.0),
+          vec2<f32>(-1.0, 1.0),
+          vec2<f32>(1.0, 1.0),
+        );
+        let uv = array<vec2<f32>, 4>(
+          vec2<f32>(0.0, 0.0),
+          vec2<f32>(1.0, 0.0),
+          vec2<f32>(0.0, 1.0),
+          vec2<f32>(1.0, 1.0),
+        );
+        var output: VertexOutput;
+        output.position = vec4<f32>(pos[i], 0.0, 1.0); 
+        output.uv = uv[i];
+        return output;
+      }
+    `;
+  const shaderCodeF = `
+      @fragment
+      fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+        return vec4<f32>(uv.x, uv.y, 0.0, 1.0);
+      }
+    `
+  const pipeline = buildRenderingPipeline(
+    device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-strip");
 
+  function render() {
+    submitRenderPass(
+      context,
+      device, 
+      { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
+      (pass) => {
+        pass.setPipeline(pipeline);
+        pass.draw(4, 1, 0, 0);
+      }
+    );
+  }
+
+  return render
+}
+
+function useGPUDevice() {
   const [device, setDevice] = React.useState<GPUDevice>();
   React.useEffect(() => {
     (async () => {
@@ -172,10 +269,16 @@ function WebGPURenderCanvas(props: {
       setDevice(device);
     })();
   }, []);
+  return device;
+}
+
+function WebGPURenderCanvas(props: {
+  createRenderer: (device: GPUDevice, context: GPUCanvasContext) => (() => void)
+}) {
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const device = useGPUDevice();
 
   React.useEffect(() => {
-    // if(canvasRef.current && !init && device) {
-    //   setInit(true);
     if(canvasRef.current && device) {
       const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
       const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -192,18 +295,23 @@ function WebGPURenderCanvas(props: {
     }
   }, [canvasRef, props, device]);
 
-
-    return <canvas ref={canvasRef} width={600} height={600}/>
+  return <canvas ref={canvasRef} width={600} height={600}/>
 }
 
 function App() {
-  React.useEffect(() => {
-    compute();
-  }, []);
+  const device = useGPUDevice();
+  // React.useEffect(() => {
+  //   if (device) compute(device);
+  // }, [device]);
+
+  // React.useEffect(() => {
+  //   if (device) genTexture(device);
+  // }, [device]);
 
   return (
     <div className="App">
-      <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/>
+      {/* <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/> */}
+      <WebGPURenderCanvas createRenderer={createRectangleRenderer}/>
     </div>
   );
 }
