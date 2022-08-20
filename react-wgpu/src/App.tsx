@@ -63,6 +63,7 @@ function createMandelbrotTextureRenerer(device: GPUDevice): [GPUTexture, (scale:
     code: `
       @group(0) @binding(1) var output: texture_storage_2d<rgba8unorm, write>;
       @group(0) @binding(2) var<uniform> scale: f32;
+      @group(0) @binding(3) var<uniform> trans: vec2<f32>;
 
       fn mandelbrot(z: vec2<f32>, c: vec2<f32>) -> vec2<f32> {
         return vec2<f32>(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
@@ -77,7 +78,7 @@ function createMandelbrotTextureRenerer(device: GPUDevice): [GPUTexture, (scale:
 
         let xy = vec2<f32>(global_id.xy) / vec2<f32>(dims);
 
-        let c = scale * (xy - vec2<f32>(0.5, 0.5));
+        let c = scale * (xy - vec2<f32>(0.5, 0.5)) + trans;
 
         const MAX_LOOP_COUNT: i32 = 100;
 
@@ -85,7 +86,8 @@ function createMandelbrotTextureRenerer(device: GPUDevice): [GPUTexture, (scale:
         var count: i32 = 0;
         for (;count < MAX_LOOP_COUNT; count++) {
           z = mandelbrot(z, c);
-          if length(z) > scale { break; }
+          // if length(z) > scale { break; }
+          if length(z) > 3.0 { break; }
         }
 
         var color = vec4(0.0, 0.0, 0.0, 1.0);
@@ -136,10 +138,9 @@ function createMandelbrotTextureRenerer(device: GPUDevice): [GPUTexture, (scale:
     entries: [
       { binding: 1, resource: texture.createView() },
       { binding: 2, resource: { buffer: scaleUniformBuf } },
-      // { binding: 3, resource: { buffer: transUniformBuf } },
+      { binding: 3, resource: { buffer: transUniformBuf } },
     ]
   });
-
 
   const renderer = (scale: number, transX: number, transY: number) => {
     device.queue.writeBuffer(scaleUniformBuf, 0, new Float32Array([scale]).buffer);
@@ -302,9 +303,8 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
     ]
   });
 
-  return (scale: number) => {
-    console.log(scale);
-    renderMandelbrot(scale, 0.0, 0.0);
+  return (scale: number, x: number, y: number) => {
+    renderMandelbrot(scale, x, y);
     submitRenderPass(
       context,
       device, 
@@ -409,20 +409,25 @@ function App() {
     }
   }, [canvasRef, device]);
 
-  const [renderer, setRenderer] = React.useState<(scale:number) => void>();
+  const [renderer, setRenderer] = React.useState<(scale:number, x:number, y:number) => void>();
   React.useEffect(() => {
     if(context && device) {
       setRenderer(() => createRectangleRenderer(device, context));
     }
   }, [device, context]);
  
+  type Pos = { x: number, y: number }
+
   const [scale, setScale] = React.useState(3.0);
+  const [xy, setXy] = React.useState<Pos>({ x: 0.0, y: 0.0 });
   React.useEffect(() => {
     if (renderer) {
-      const id = setInterval(() => renderer(scale), 20);
+      const id = setInterval(() => renderer(scale, xy.x, xy.y), 20);
       return () => clearInterval(id);
     }
-  }, [scale, renderer])
+  }, [scale, xy, renderer])
+
+  const [mouseDown, setMouseDown] = React.useState<[Pos, Pos]>();
 
   return (
     <canvas ref={canvasRef} width={600} height={600}
@@ -432,7 +437,18 @@ function App() {
         } else {
           setScale(scale / 1.1);
         }
-      }}/>);
+      }}
+      onMouseDown={e => setMouseDown([{ x: e.clientX, y: e.clientY}, xy])}
+      onMouseUp={e => setMouseDown(undefined)}
+      onMouseMove={e => {
+        if (mouseDown) {
+          const dx = (e.clientX - mouseDown[0].x) * 2 * scale / 600;
+          const dy = (e.clientY - mouseDown[0].y) * 2 * scale / 600;
+          const xy0 = mouseDown[1];
+          setXy({ x: xy0.x - dx, y: xy0.y + dy })
+        }
+      }}
+    />);
 }
 
 export default App;
