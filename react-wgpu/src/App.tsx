@@ -74,10 +74,53 @@ function genTexture(device: GPUDevice) {
       }
     `
   });
+  const mandelbrotShader = device.createShaderModule({
+    code: `
+      @group(0) @binding(1) var output: texture_storage_2d<rgba8unorm, write>;
+
+      fn mandelbrot(z: vec2<f32>, c: vec2<f32>) -> vec2<f32> {
+        return vec2<f32>(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+      }
+
+      @compute @workgroup_size(16, 16)
+      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        let dims = textureDimensions(output);
+        let xy = vec2<f32>(global_id.xy) / vec2<f32>(dims);
+
+        let scale = 2.0;
+        let c = scale * (xy - vec2<f32>(0.5, 0.5));
+
+        const MAX_LOOP_COUNT: i32 = 100;
+
+        var z = vec2<f32>(0.0, 0.0);
+        var count: i32 = 0;
+        for (;count < MAX_LOOP_COUNT; count++) {
+          z = mandelbrot(z, c);
+          if length(z) > scale { break; }
+        }
+
+        var color = vec4(0.0, 0.0, 0.0, 1.0);
+        if count == MAX_LOOP_COUNT {
+          color.r = 1.0;
+        } else {
+          color.g = f32(count) / f32(MAX_LOOP_COUNT);
+          color.b = f32(count) / f32(MAX_LOOP_COUNT);
+        }
+
+        textureStore(
+          output,
+          vec2<i32>(global_id.xy),
+          // vec4<f32>(c, 0.0, 1.0)
+          color
+        );
+      }
+    `
+  });
   const pipeline = device.createComputePipeline({
     layout: "auto",
     compute: {
-      module: shader,
+      // module: shader,
+      module: mandelbrotShader,
       entryPoint: "main"
     }
   });
@@ -246,8 +289,7 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
     device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-strip");
 
   const texture = genTexture(device);
-  // const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
-  const sampler = device.createSampler();
+  const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
 
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
