@@ -1,4 +1,5 @@
 import React from 'react';
+import { text } from 'stream/consumers';
 import './App.css';
 
 async function compute(device: GPUDevice) {
@@ -63,13 +64,13 @@ function genTexture(device: GPUDevice) {
       @group(0) @binding(1) var output: texture_storage_2d<rgba8unorm, write>;
 
       @compute @workgroup_size(16, 16)
-      fn main(
-        @builtin(global_invocation_id) global_id: vec3<u32>,
-        @builtin(local_invocation_id) local_id: vec3<u32>
-      ) {
-        let x = global_id.x * 16 + local_id.x;
-        let y = global_id.y * 16 + local_id.y;
-        textureStore(output, vec2<i32>(i32(x), i32(y)), vec4<f32>(f32(x) / 256.0, f32(y) / 256.0, 0.0, 1.0));
+      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+        let dims = textureDimensions(output);
+        textureStore(
+          output,
+          vec2<i32>(global_id.xy),
+          vec4<f32>(vec2<f32>(global_id.xy) / vec2<f32>(dims), 0.0, 1.0)
+        );
       }
     `
   });
@@ -81,7 +82,7 @@ function genTexture(device: GPUDevice) {
     }
   });
 
-  const IMAGE_SIZE = 256;
+  const IMAGE_SIZE = 512;
 
   const texture = device.createTexture({
     format: "rgba8unorm",
@@ -103,12 +104,8 @@ function genTexture(device: GPUDevice) {
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(Math.ceil(IMAGE_SIZE / 16), Math.ceil(IMAGE_SIZE / 16));
   pass.end();
-  // encoder.copyBufferToBuffer(outputBuf, 0, stagingBuf, 0, BUFFER_SIZE);
-  // device?.queue.submit([encoder.finish()]);
+  device.queue.submit([encoder.finish()]);
 
-  // await stagingBuf.mapAsync(GPUMapMode.READ, 0, BUFFER_SIZE);
-  // const copied = new Float32Array(stagingBuf.getMappedRange(0, BUFFER_SIZE).slice(0));
-  // console.log(copied);
   console.log("end computation");
   return texture;
 }
@@ -154,8 +151,7 @@ function submitRenderPass(ctx: GPUCanvasContext, device: GPUDevice, clearColor: 
 
 function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
   const shaderCodeV = `
-      @group(0) @binding(0)
-      var<uniform> counter: f32;
+      @group(0) @binding(0) var<uniform> counter: f32;
 
       @vertex
       fn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {
@@ -177,7 +173,8 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
         return vec4<f32>(1.0, 0.5, 0.0, 1.0);
       }
     `
-  const pipeline = buildRenderingPipeline(device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-list");
+  const pipeline = buildRenderingPipeline(
+    device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-list");
 
   const uniformBuf = device.createBuffer({
     size: 4,
@@ -186,9 +183,8 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
 
   let counter = 0;
 
-  const bindGroupLayout = pipeline.getBindGroupLayout(0);
   const bindGroup = device.createBindGroup({
-    layout: bindGroupLayout,
+    layout: pipeline.getBindGroupLayout(0),
     entries: [{ binding: 0, resource: { buffer: uniformBuf } }]
   });
 
@@ -237,27 +233,42 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
       }
     `;
   const shaderCodeF = `
+      @group(0) @binding(0) var mySampler: sampler;
+      @group(0) @binding(1) var myTexture: texture_2d<f32>;
+
       @fragment
       fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-        return vec4<f32>(uv.x, uv.y, 0.0, 1.0);
+        // return vec4<f32>(uv.x, uv.y, 0.0, 1.0);
+        return textureSample(myTexture, mySampler, uv);
       }
     `
   const pipeline = buildRenderingPipeline(
     device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-strip");
 
-  function render() {
+  const texture = genTexture(device);
+  // const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+  const sampler = device.createSampler();
+
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: sampler },
+      { binding: 1, resource: texture.createView() }
+    ]
+  });
+
+  return () => {
     submitRenderPass(
       context,
       device, 
       { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
       (pass) => {
         pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
         pass.draw(4, 1, 0, 0);
       }
     );
-  }
-
-  return render
+  };
 }
 
 function useGPUDevice() {
