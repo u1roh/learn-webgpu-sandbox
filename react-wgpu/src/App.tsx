@@ -1,5 +1,4 @@
 import React from 'react';
-import logo from './logo.svg';
 import './App.css';
 
 async function compute() {
@@ -49,10 +48,10 @@ async function compute() {
 
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
-  pass?.setPipeline(pipeline);
+  pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass?.dispatchWorkgroups(Math.ceil(BUFFER_SIZE / 64));
-  pass?.end();
+  pass.dispatchWorkgroups(Math.ceil(BUFFER_SIZE / 64));
+  pass.end();
   encoder.copyBufferToBuffer(outputBuf, 0, stagingBuf, 0, BUFFER_SIZE);
   device?.queue.submit([encoder.finish()]);
 
@@ -62,8 +61,7 @@ async function compute() {
   console.log("end computation");
 }
 
-async function createRenderer(canvas: HTMLCanvasElement) {
-
+async function buildRenderingPipeline(canvas: HTMLCanvasElement, shaderCodeV: string, shaderCodeF: string) {
   const adapter = await navigator.gpu.requestAdapter();
   const device = await adapter?.requestDevice();
   if (!adapter || !device) return;
@@ -76,8 +74,42 @@ async function createRenderer(canvas: HTMLCanvasElement) {
     alphaMode: "opaque"
   });
 
-  const shaderV = device.createShaderModule({
-    code: `
+  const pipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: {
+      module: device.createShaderModule({ code: shaderCodeV }),
+      entryPoint: "main"
+    },
+    fragment:{
+      module: device.createShaderModule({ code: shaderCodeF }),
+      entryPoint: "main",
+      targets: [{ format: presentationFormat }]
+    },
+    primitive: {
+      topology: "triangle-list"
+    }
+  });
+
+  return { context, device, pipeline }
+}
+
+function submitRenderPass(ctx: GPUCanvasContext, device: GPUDevice, clearColor: GPUColor, renderPass: (pass: GPURenderPassEncoder) => void) {
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: ctx.getCurrentTexture().createView(),
+      clearValue: clearColor,
+      loadOp: "clear",
+      storeOp: "store"
+    } as GPURenderPassColorAttachment]
+  });
+  renderPass(pass);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+}
+
+async function createRenderer(canvas: HTMLCanvasElement) {
+  const shaderCodeV = `
       @group(0) @binding(0)
       var<uniform> counter: f32;
 
@@ -94,31 +126,17 @@ async function createRenderer(canvas: HTMLCanvasElement) {
         let y = sin(theta) * pos[i].x + cos(theta) * pos[i].y;
         return vec4<f32>(x, y, 0.0, 1.0);
       }
-    `
-  });
-  const shaderF = device.createShaderModule({
-    code: `
+    `;
+  const shaderCodeF = `
       @fragment
       fn main() -> @location(0) vec4<f32> {
         return vec4<f32>(1.0, 0.5, 0.0, 1.0);
       }
     `
-  });
-  const pipeline = shaderV && device.createRenderPipeline({
-    layout: "auto",
-    vertex: {
-      module: shaderV,
-      entryPoint: "main"
-    },
-    fragment:{
-      module: shaderF,
-      entryPoint: "main",
-      targets: [{ format: presentationFormat }]
-    },
-    primitive: {
-      topology: "triangle-list"
-    }
-  });
+  const renderer = await buildRenderingPipeline(canvas, shaderCodeV, shaderCodeF);
+  if (!renderer) return;
+  
+  const { context, device, pipeline } = renderer;
 
   const uniformBuf = device.createBuffer({
     size: 4,
@@ -134,33 +152,23 @@ async function createRenderer(canvas: HTMLCanvasElement) {
   });
 
   function render() {
-    if(!device) return;
     device.queue.writeBuffer(uniformBuf, 0, new Float32Array([counter++]).buffer);
-
-    const view = context.getCurrentTexture().createView();
-
-    const encoder = device.createCommandEncoder();
-    const colorAttachment: GPURenderPassColorAttachment = {
-      view,
-      clearValue: { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
-      loadOp: "clear",
-      storeOp: "store"
-    };
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [colorAttachment],
-    });
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.draw(3, 1, 0, 0);
-    pass.end();
-
-    device.queue.submit([encoder.finish()]);
-
-    // requestAnimationFrame(render);
+    submitRenderPass(
+      context,
+      device, 
+      { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
+      (pass) => {
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.draw(3, 1, 0, 0);
+      }
+    );
   }
 
   return render
 }
+
+
 function App() {
   React.useEffect(() => {
     compute();
