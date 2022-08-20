@@ -87,7 +87,7 @@ function genTexture(device: GPUDevice) {
         let dims = textureDimensions(output);
         let xy = vec2<f32>(global_id.xy) / vec2<f32>(dims);
 
-        let scale = 2.0;
+        let scale = 3.0;
         let c = scale * (xy - vec2<f32>(0.5, 0.5));
 
         const MAX_LOOP_COUNT: i32 = 100;
@@ -101,16 +101,17 @@ function genTexture(device: GPUDevice) {
 
         var color = vec4(0.0, 0.0, 0.0, 1.0);
         if count == MAX_LOOP_COUNT {
+        } else if count % 3 == 0 {
           color.r = 1.0;
+        } else if count % 3 == 1 {
+          color.g = 1.0;
         } else {
-          color.g = f32(count) / f32(MAX_LOOP_COUNT);
-          color.b = f32(count) / f32(MAX_LOOP_COUNT);
+          color.b = 1.0;
         }
 
         textureStore(
           output,
           vec2<i32>(global_id.xy),
-          // vec4<f32>(c, 0.0, 1.0)
           color
         );
       }
