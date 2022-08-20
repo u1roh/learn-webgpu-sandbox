@@ -58,25 +58,11 @@ async function compute(device: GPUDevice) {
   console.log("end computation");
 }
 
-function genTexture(device: GPUDevice) {
-  const shader = device.createShaderModule({
-    code: `
-      @group(0) @binding(1) var output: texture_storage_2d<rgba8unorm, write>;
-
-      @compute @workgroup_size(16, 16)
-      fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-        let dims = textureDimensions(output);
-        textureStore(
-          output,
-          vec2<i32>(global_id.xy),
-          vec4<f32>(vec2<f32>(global_id.xy) / vec2<f32>(dims), 0.0, 1.0)
-        );
-      }
-    `
-  });
+function createMandelbrotTextureRenerer(device: GPUDevice): [GPUTexture, (scale:number, x:number, y:number) => void] {
   const mandelbrotShader = device.createShaderModule({
     code: `
       @group(0) @binding(1) var output: texture_storage_2d<rgba8unorm, write>;
+      @group(0) @binding(2) var<uniform> scale: f32;
 
       fn mandelbrot(z: vec2<f32>, c: vec2<f32>) -> vec2<f32> {
         return vec2<f32>(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
@@ -85,9 +71,12 @@ function genTexture(device: GPUDevice) {
       @compute @workgroup_size(16, 16)
       fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dims = textureDimensions(output);
+        if i32(global_id.x) >= dims.x || i32(global_id.y) >= dims.y {
+          return;
+        }
+
         let xy = vec2<f32>(global_id.xy) / vec2<f32>(dims);
 
-        let scale = 3.0;
         let c = scale * (xy - vec2<f32>(0.5, 0.5));
 
         const MAX_LOOP_COUNT: i32 = 100;
@@ -120,38 +109,51 @@ function genTexture(device: GPUDevice) {
   const pipeline = device.createComputePipeline({
     layout: "auto",
     compute: {
-      // module: shader,
       module: mandelbrotShader,
       entryPoint: "main"
     }
+  });
+
+  const scaleUniformBuf = device.createBuffer({
+    size: 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  });
+  const transUniformBuf = device.createBuffer({
+    size: 4 * 2,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
   });
 
   const IMAGE_SIZE = 512;
 
   const texture = device.createTexture({
     format: "rgba8unorm",
-    // format: "rgba32float",
     size: [IMAGE_SIZE, IMAGE_SIZE],
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
   });
 
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 1, resource: texture.createView() }]
+    entries: [
+      { binding: 1, resource: texture.createView() },
+      { binding: 2, resource: { buffer: scaleUniformBuf } },
+      // { binding: 3, resource: { buffer: transUniformBuf } },
+    ]
   });
 
-  console.log("start computation");
 
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil(IMAGE_SIZE / 16), Math.ceil(IMAGE_SIZE / 16));
-  pass.end();
-  device.queue.submit([encoder.finish()]);
+  const renderer = (scale: number, transX: number, transY: number) => {
+    device.queue.writeBuffer(scaleUniformBuf, 0, new Float32Array([scale]).buffer);
+    device.queue.writeBuffer(transUniformBuf, 0, new Float32Array([transX, transY]).buffer);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(IMAGE_SIZE / 16), Math.ceil(IMAGE_SIZE / 16));
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  };
 
-  console.log("end computation");
-  return texture;
+  return [texture, renderer]
 }
 
 function buildRenderingPipeline(
@@ -289,7 +291,7 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
   const pipeline = buildRenderingPipeline(
     device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-strip");
 
-  const texture = genTexture(device);
+  const [texture, renderMandelbrot] = createMandelbrotTextureRenerer(device);
   const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
 
   const bindGroup = device.createBindGroup({
@@ -300,7 +302,9 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
     ]
   });
 
-  return () => {
+  return (scale: number) => {
+    console.log(scale);
+    renderMandelbrot(scale, 0.0, 0.0);
     submitRenderPass(
       context,
       device, 
@@ -328,6 +332,7 @@ function useGPUDevice() {
 
 function WebGPURenderCanvas(props: {
   createRenderer: (device: GPUDevice, context: GPUCanvasContext) => (() => void)
+  onWheel?: React.WheelEventHandler<HTMLCanvasElement>
 }) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const device = useGPUDevice();
@@ -343,17 +348,18 @@ function WebGPURenderCanvas(props: {
       });
 
       const renderer = props.createRenderer(device, context);
-      setInterval(renderer, 20);
+      const id = setInterval(renderer, 20);
+      return () => clearInterval(id);
       // requestAnimationFrame() を使うと何故か uniform buffer を使ったときに描画できなくなった
       // requestAnimationFrame(renderer)
     }
   }, [canvasRef, props, device]);
 
-  return <canvas ref={canvasRef} width={600} height={600}/>
+  return <canvas ref={canvasRef} width={600} height={600} onWheel={props.onWheel}/>
 }
 
 function App() {
-  const device = useGPUDevice();
+  // const device = useGPUDevice();
   // React.useEffect(() => {
   //   if (device) compute(device);
   // }, [device]);
@@ -362,12 +368,71 @@ function App() {
   //   if (device) genTexture(device);
   // }, [device]);
 
+  // ---------------
+
+  // const [scale, setScale] = React.useState(3.0);
+
+  // const createMandelbrotRenderer = React.useCallback((device: GPUDevice, context: GPUCanvasContext) => {
+  //   const render = createRectangleRenderer(device, context);
+  //   return () => render(scale);
+  // }, [scale])
+
+  // return (
+  //   <div className="App">
+  //     {/* <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/> */}
+  //     <WebGPURenderCanvas createRenderer={createMandelbrotRenderer}
+  //       onWheel={e => {
+  //         if (e.deltaY > 0) {
+  //           setScale(scale * 1.1);
+  //         } else {
+  //           setScale(scale / 1.1);
+  //         }
+  //       }}/>
+  //   </div>
+  // );
+
+  // ---------------
+
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const device = useGPUDevice();
+  const context = React.useMemo(() => {
+    if(canvasRef.current && device) {
+      const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
+      const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+      context.configure({
+        device,
+        format: presentationFormat,
+        alphaMode: "opaque"
+      });
+      console.log(presentationFormat);
+      return context;
+    }
+  }, [canvasRef, device]);
+
+  const [renderer, setRenderer] = React.useState<(scale:number) => void>();
+  React.useEffect(() => {
+    if(context && device) {
+      setRenderer(() => createRectangleRenderer(device, context));
+    }
+  }, [device, context]);
+ 
+  const [scale, setScale] = React.useState(3.0);
+  React.useEffect(() => {
+    if (renderer) {
+      const id = setInterval(() => renderer(scale), 20);
+      return () => clearInterval(id);
+    }
+  }, [scale, renderer])
+
   return (
-    <div className="App">
-      {/* <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/> */}
-      <WebGPURenderCanvas createRenderer={createRectangleRenderer}/>
-    </div>
-  );
+    <canvas ref={canvasRef} width={600} height={600}
+      onWheel={e => {
+        if (e.deltaY > 0) {
+          setScale(scale * 1.1);
+        } else {
+          setScale(scale / 1.1);
+        }
+      }}/>);
 }
 
 export default App;
