@@ -50,7 +50,7 @@ export function createScreenRectRenderer(
       (pass) => {
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
-        pass.draw(4, 1, 0, 0);
+        pass.draw(4);
       }
     );
   };

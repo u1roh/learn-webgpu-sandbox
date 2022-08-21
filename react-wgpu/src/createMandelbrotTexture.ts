@@ -23,27 +23,26 @@ export function createMandelbrotTexture(device: GPUDevice): Mandelbrot {
         }
 
         let xy = vec2<f32>(global_id.xy) / vec2<f32>(dims);
-
         let c = scale * (xy - vec2<f32>(0.5, 0.5)) + trans;
 
-        const MAX_LOOP_COUNT: i32 = 100;
+        const MAX_LOOP_COUNT: i32 = 1000;
+        const DIVERGENT_DISTANCE: f32 = 3.0;
 
         var z = vec2<f32>(0.0, 0.0);
-        var count: i32 = 0;
-        for (;count < MAX_LOOP_COUNT; count++) {
+        var diverge_count: i32 = 0;
+        for (;diverge_count < MAX_LOOP_COUNT; diverge_count++) {
           z = mandelbrot(z, c);
-          // if length(z) > scale { break; }
-          if length(z) > 3.0 { break; }
+          if length(z) > DIVERGENT_DISTANCE { break; }
         }
 
         var color = vec4(0.0, 0.0, 0.0, 1.0);
-        if count == MAX_LOOP_COUNT {
-        } else if count % 3 == 0 {
-          color.r = 1.0;
-        } else if count % 3 == 1 {
-          color.g = 1.0;
-        } else {
-          color.b = 1.0;
+        if diverge_count != MAX_LOOP_COUNT {
+          switch diverge_count % 3 {
+            case 0: { color.r = 1.0; }
+            case 1: { color.g = 1.0; }
+            case 2: { color.b = 1.0; }
+            default: {}
+          }
         }
 
         textureStore(

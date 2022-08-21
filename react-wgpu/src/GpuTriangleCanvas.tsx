@@ -75,8 +75,6 @@ export function GpuTriangleCanvas() {
   const device = GpuUtil.useGPUDevice();
   const [context, canvasRef] = GpuUtil.useGPUCanvasContext(device);
   const render = useRotatingTriangleRenderer(device, context);
-
   GpuUtil.useAnimationFrame(render);
-
   return <canvas ref={canvasRef} width={600} height={600}/>;
 }
