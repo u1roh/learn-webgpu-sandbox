@@ -3,63 +3,7 @@ import './App.css';
 import { createMandelbrotTexture } from './createMandelbrotTexture';
 import { helloComputePipeline } from './helloComputePipeline';
 import * as GpuUtil from './GpuUtil';
-
-function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
-  const shaderCodeV = `
-      const POS = array<vec2<f32>, 3>(
-        vec2<f32>(0.0, 0.5),
-        vec2<f32>(-0.5, -0.5),
-        vec2<f32>(0.5, -0.5),
-      );
-
-      @group(0) @binding(0) var<uniform> theta: f32;
-
-      @vertex
-      fn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {
-        let x = cos(theta) * POS[i].x - sin(theta) * POS[i].y;
-        let y = sin(theta) * POS[i].x + cos(theta) * POS[i].y;
-        return vec4<f32>(x, y, 0.0, 1.0);
-      }
-    `;
-  const shaderCodeF = `
-      @fragment
-      fn main() -> @location(0) vec4<f32> {
-        return vec4<f32>(1.0, 0.5, 0.0, 1.0);
-      }
-    `
-  const pipeline = GpuUtil.buildRenderPipeline(
-    device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-list");
-
-  const uniformBuf = device.createBuffer({
-    size: 4,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  });
-  const delta = 5.0 * Math.PI / 180.0;
-  const theta = new Float32Array([0.0]);
-  theta[0] = 1.0;
-
-  const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: { buffer: uniformBuf } }]
-  });
-
-  function render() {
-    theta[0] += delta;
-    device.queue.writeBuffer(uniformBuf, 0, theta.buffer);
-    GpuUtil.submitRenderPass(
-      context,
-      device, 
-      { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
-      (pass) => {
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.draw(3, 1, 0, 0);
-      }
-    );
-  }
-
-  return render
-}
+import { GpuTriangleCanvas } from './GpuTriangleCanvas';
 
 function createRectangleRenderer(
   device: GPUDevice,
@@ -151,68 +95,11 @@ function useMandelbrotRenderer(device: GPUDevice | undefined, context: GPUCanvas
   return renderer;
 }
 
-function WebGPURenderCanvas(props: {
-  createRenderer: (device: GPUDevice, context: GPUCanvasContext) => (() => void)
-  onWheel?: React.WheelEventHandler<HTMLCanvasElement>
-}) {
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const device = GpuUtil.useGPUDevice();
-
-  React.useEffect(() => {
-    if(canvasRef.current && device) {
-      const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
-      const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-      context.configure({
-        device,
-        format: presentationFormat,
-        alphaMode: "opaque"
-      });
-
-      const renderer = props.createRenderer(device, context);
-      const id = setInterval(renderer, 20);
-      return () => clearInterval(id);
-      // requestAnimationFrame() を使うと何故か uniform buffer を使ったときに描画できなくなった
-      // requestAnimationFrame(renderer)
-    }
-  }, [canvasRef, props, device]);
-
-  return <canvas ref={canvasRef} width={600} height={600} onWheel={props.onWheel}/>
-}
-
 function App() {
   const device = GpuUtil.useGPUDevice();
   React.useEffect(() => {
     if (device) helloComputePipeline(device).then(array => console.log(array));
   }, [device]);
-
-  // React.useEffect(() => {
-  //   if (device) genTexture(device);
-  // }, [device]);
-
-  // ---------------
-
-  // const [scale, setScale] = React.useState(3.0);
-
-  // const createMandelbrotRenderer = React.useCallback((device: GPUDevice, context: GPUCanvasContext) => {
-  //   const render = createRectangleRenderer(device, context);
-  //   return () => render(scale);
-  // }, [scale])
-
-  // return (
-  //   <div className="App">
-  //     {/* <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/> */}
-  //     <WebGPURenderCanvas createRenderer={createMandelbrotRenderer}
-  //       onWheel={e => {
-  //         if (e.deltaY > 0) {
-  //           setScale(scale * 1.1);
-  //         } else {
-  //           setScale(scale / 1.1);
-  //         }
-  //       }}/>
-  //   </div>
-  // );
-
-  // ---------------
 
   const [context, canvasRef] = GpuUtil.useGPUCanvasContext(device);
   const renderMandelbrot = useMandelbrotRenderer(device, context);
@@ -252,7 +139,7 @@ function App() {
           }
         }}
       />
-      {/* <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/> */}
+      <GpuTriangleCanvas/>
     </div>);
 }
 
