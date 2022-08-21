@@ -1,62 +1,7 @@
 import React from 'react';
 import { text } from 'stream/consumers';
 import './App.css';
-
-async function compute(device: GPUDevice) {
-  const shader = device.createShaderModule({
-    code: `
-      @group(0) @binding(1)
-      var<storage, read_write> output: array<f32>;
-
-      @compute @workgroup_size(64)
-      fn main(
-        @builtin(global_invocation_id) global_id: vec3<u32>,
-        @builtin(local_invocation_id) local_id: vec3<u32>
-      ) {
-        output[local_id.x] = f32(global_id.x) * 1000. + f32(local_id.x);
-      }
-    `
-  });
-  const pipeline = device.createComputePipeline({
-    layout: "auto",
-    compute: {
-      module: shader,
-      entryPoint: "main"
-    }
-  });
-
-  const BUFFER_SIZE = 1000;
-
-  const outputBuf = device.createBuffer({
-    size: BUFFER_SIZE,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-  });
-  const stagingBuf = device.createBuffer({
-    size: BUFFER_SIZE,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-  })
-
-  const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 1, resource: { buffer: outputBuf } }]
-  });
-
-  console.log("start computation");
-
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil(BUFFER_SIZE / 64));
-  pass.end();
-  encoder.copyBufferToBuffer(outputBuf, 0, stagingBuf, 0, BUFFER_SIZE);
-  device?.queue.submit([encoder.finish()]);
-
-  await stagingBuf.mapAsync(GPUMapMode.READ, 0, BUFFER_SIZE);
-  const copied = new Float32Array(stagingBuf.getMappedRange(0, BUFFER_SIZE).slice(0));
-  console.log(copied);
-  console.log("end computation");
-}
+import { helloComputePipeline } from './helloComputePipeline';
 
 function createMandelbrotTextureRenerer(device: GPUDevice): [GPUTexture, (scale:number, x:number, y:number) => void] {
   const mandelbrotShader = device.createShaderModule({
@@ -359,10 +304,10 @@ function WebGPURenderCanvas(props: {
 }
 
 function App() {
-  // const device = useGPUDevice();
-  // React.useEffect(() => {
-  //   if (device) compute(device);
-  // }, [device]);
+  const device = useGPUDevice();
+  React.useEffect(() => {
+    if (device) helloComputePipeline(device).then(array => console.log(array));
+  }, [device]);
 
   // React.useEffect(() => {
   //   if (device) genTexture(device);
@@ -394,17 +339,16 @@ function App() {
   // ---------------
 
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const device = useGPUDevice();
+  // const device = useGPUDevice();
   const context = React.useMemo(() => {
     if(canvasRef.current && device) {
-      const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
-      const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-      context.configure({
+      // const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
+      const context = canvasRef.current.getContext('webgpu');
+      context?.configure({
         device,
-        format: presentationFormat,
+        format: navigator.gpu.getPreferredCanvasFormat(),
         alphaMode: "opaque"
       });
-      console.log(presentationFormat);
       return context;
     }
   }, [canvasRef, device]);
@@ -430,25 +374,29 @@ function App() {
   const [mouseDown, setMouseDown] = React.useState<[Pos, Pos]>();
 
   return (
-    <canvas ref={canvasRef} width={600} height={600}
-      onWheel={e => {
-        if (e.deltaY > 0) {
-          setScale(scale * 1.1);
-        } else {
-          setScale(scale / 1.1);
-        }
-      }}
-      onMouseDown={e => setMouseDown([{ x: e.clientX, y: e.clientY}, xy])}
-      onMouseUp={e => setMouseDown(undefined)}
-      onMouseMove={e => {
-        if (mouseDown) {
-          const dx = (e.clientX - mouseDown[0].x) * 2 * scale / 600;
-          const dy = (e.clientY - mouseDown[0].y) * 2 * scale / 600;
-          const xy0 = mouseDown[1];
-          setXy({ x: xy0.x - dx, y: xy0.y + dy })
-        }
-      }}
-    />);
+    <div>
+      <canvas ref={canvasRef} width={600} height={600}
+        onWheel={e => {
+          if (e.deltaY > 0) {
+            setScale(scale * 1.1);
+          } else {
+            setScale(scale / 1.1);
+          }
+          console.log({ scale });
+        }}
+        onMouseDown={e => setMouseDown([{ x: e.clientX, y: e.clientY}, xy])}
+        onMouseUp={e => setMouseDown(undefined)}
+        onMouseMove={e => {
+          if (mouseDown) {
+            const dx = (e.clientX - mouseDown[0].x) * 2 * scale / 600;
+            const dy = (e.clientY - mouseDown[0].y) * 2 * scale / 600;
+            const xy0 = mouseDown[1];
+            setXy({ x: xy0.x - dx, y: xy0.y + dy })
+          }
+        }}
+      />
+      {/* <WebGPURenderCanvas createRenderer={createRotatingTriangleRenderer}/> */}
+    </div>);
 }
 
 export default App;
