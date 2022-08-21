@@ -1,63 +1,23 @@
 import React from 'react';
-import { text } from 'stream/consumers';
 import './App.css';
 import { createMandelbrotTexture } from './createMandelbrotTexture';
 import { helloComputePipeline } from './helloComputePipeline';
-
-function buildRenderingPipeline(
-  device: GPUDevice,
-  format: GPUTextureFormat,
-  shaderCodeV: string,
-  shaderCodeF: string,
-  topology: GPUPrimitiveTopology
-) {
-  return device.createRenderPipeline({
-    layout: "auto",
-    vertex: {
-      module: device.createShaderModule({ code: shaderCodeV }),
-      entryPoint: "main"
-    },
-    fragment:{
-      module: device.createShaderModule({ code: shaderCodeF }),
-      entryPoint: "main",
-      targets: [{ format }]
-    },
-    primitive: {
-      topology,
-    }
-  });
-}
-
-function submitRenderPass(ctx: GPUCanvasContext, device: GPUDevice, clearColor: GPUColor, renderPass: (pass: GPURenderPassEncoder) => void) {
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [{
-      view: ctx.getCurrentTexture().createView(),
-      clearValue: clearColor,
-      loadOp: "clear",
-      storeOp: "store"
-    } as GPURenderPassColorAttachment]
-  });
-  renderPass(pass);
-  pass.end();
-  device.queue.submit([encoder.finish()]);
-}
+import * as GpuUtil from './GpuUtil';
 
 function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
   const shaderCodeV = `
-      @group(0) @binding(0) var<uniform> counter: f32;
+      const POS = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 0.5),
+        vec2<f32>(-0.5, -0.5),
+        vec2<f32>(0.5, -0.5),
+      );
+
+      @group(0) @binding(0) var<uniform> theta: f32;
 
       @vertex
       fn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {
-        let pos = array<vec2<f32>, 3>(
-          vec2<f32>(0.0, 0.5),
-          vec2<f32>(-0.5, -0.5),
-          vec2<f32>(0.5, -0.5),
-        );
-        // return vec4<f32>(pos[i], 0.0, 1.0);
-        let theta = counter * 3.14 / 72.0;
-        let x = cos(theta) * pos[i].x - sin(theta) * pos[i].y;
-        let y = sin(theta) * pos[i].x + cos(theta) * pos[i].y;
+        let x = cos(theta) * POS[i].x - sin(theta) * POS[i].y;
+        let y = sin(theta) * POS[i].x + cos(theta) * POS[i].y;
         return vec4<f32>(x, y, 0.0, 1.0);
       }
     `;
@@ -67,15 +27,16 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
         return vec4<f32>(1.0, 0.5, 0.0, 1.0);
       }
     `
-  const pipeline = buildRenderingPipeline(
+  const pipeline = GpuUtil.buildRenderPipeline(
     device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-list");
 
   const uniformBuf = device.createBuffer({
     size: 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
   });
-
-  let counter = 0;
+  const delta = 5.0 * Math.PI / 180.0;
+  const theta = new Float32Array([0.0]);
+  theta[0] = 1.0;
 
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -83,8 +44,9 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
   });
 
   function render() {
-    device.queue.writeBuffer(uniformBuf, 0, new Float32Array([counter++]).buffer);
-    submitRenderPass(
+    theta[0] += delta;
+    device.queue.writeBuffer(uniformBuf, 0, theta.buffer);
+    GpuUtil.submitRenderPass(
       context,
       device, 
       { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
@@ -99,8 +61,27 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
   return render
 }
 
-function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
+function createRectangleRenderer(
+  device: GPUDevice,
+  context: GPUCanvasContext,
+  fragShader: string,
+  bindGroupEntries: GPUBindGroupEntry[],
+) {
   const shaderCodeV = `
+      const POS = array<vec2<f32>, 4>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(1.0, -1.0),
+        vec2<f32>(-1.0, 1.0),
+        vec2<f32>(1.0, 1.0),
+      );
+
+      const UV = array<vec2<f32>, 4>(
+        vec2<f32>(0.0, 0.0),
+        vec2<f32>(1.0, 0.0),
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(1.0, 1.0),
+      );
+
       struct VertexOutput {
         @builtin(position) position: vec4<f32>,
         @location(0) uv: vec2<f32>,
@@ -108,51 +89,22 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
 
       @vertex
       fn main(@builtin(vertex_index) i : u32) -> VertexOutput {
-        let pos = array<vec2<f32>, 4>(
-          vec2<f32>(-1.0, -1.0),
-          vec2<f32>(1.0, -1.0),
-          vec2<f32>(-1.0, 1.0),
-          vec2<f32>(1.0, 1.0),
-        );
-        let uv = array<vec2<f32>, 4>(
-          vec2<f32>(0.0, 0.0),
-          vec2<f32>(1.0, 0.0),
-          vec2<f32>(0.0, 1.0),
-          vec2<f32>(1.0, 1.0),
-        );
         var output: VertexOutput;
-        output.position = vec4<f32>(pos[i], 0.0, 1.0); 
-        output.uv = uv[i];
+        output.position = vec4<f32>(POS[i], 0.0, 1.0); 
+        output.uv = UV[i];
         return output;
       }
     `;
-  const shaderCodeF = `
-      @group(0) @binding(0) var mySampler: sampler;
-      @group(0) @binding(1) var myTexture: texture_2d<f32>;
-
-      @fragment
-      fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-        // return vec4<f32>(uv.x, uv.y, 0.0, 1.0);
-        return textureSample(myTexture, mySampler, uv);
-      }
-    `
-  const pipeline = buildRenderingPipeline(
-    device, context.getCurrentTexture().format, shaderCodeV, shaderCodeF, "triangle-strip");
-
-  const mandelbrot = createMandelbrotTexture(device);
-  const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+  const pipeline = GpuUtil.buildRenderPipeline(
+    device, context.getCurrentTexture().format, shaderCodeV, fragShader, "triangle-strip");
 
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: sampler },
-      { binding: 1, resource: mandelbrot.texture.createView() }
-    ]
+    entries: bindGroupEntries
   });
 
-  return (scale: number, x: number, y: number) => {
-    mandelbrot.render(scale, x, y);
-    submitRenderPass(
+  return () => {
+    GpuUtil.submitRenderPass(
       context,
       device, 
       { r: 0.2, g: 0.2, b: 0.2, a: 1.0 },
@@ -165,16 +117,38 @@ function createRectangleRenderer(device: GPUDevice, context: GPUCanvasContext) {
   };
 }
 
-function useGPUDevice() {
-  const [device, setDevice] = React.useState<GPUDevice>();
+function createMandelbrotRenderer(device: GPUDevice, context: GPUCanvasContext) {
+  const shaderCodeF = `
+      @group(0) @binding(0) var mySampler: sampler;
+      @group(0) @binding(1) var myTexture: texture_2d<f32>;
+
+      @fragment
+      fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+        return textureSample(myTexture, mySampler, uv);
+      }
+    `
+  const mandelbrot = createMandelbrotTexture(device);
+  const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+
+  const render = createRectangleRenderer(device, context, shaderCodeF, [
+      { binding: 0, resource: sampler },
+      { binding: 1, resource: mandelbrot.texture.createView() }
+  ]);
+
+  return (scale: number, x: number, y: number) => {
+    mandelbrot.render(scale, x, y);
+    render()
+  };
+}
+
+function useMandelbrotRenderer(device: GPUDevice | undefined, context: GPUCanvasContext | undefined) {
+  const [renderer, setRenderer] = React.useState<(scale:number, x:number, y:number) => void>();
   React.useEffect(() => {
-    (async () => {
-      const adapter = await navigator.gpu.requestAdapter();
-      const device = await adapter?.requestDevice();
-      setDevice(device);
-    })();
-  }, []);
-  return device;
+    if(context && device) {
+      setRenderer(() => createMandelbrotRenderer(device, context));
+    }
+  }, [device, context]);
+  return renderer;
 }
 
 function WebGPURenderCanvas(props: {
@@ -182,7 +156,7 @@ function WebGPURenderCanvas(props: {
   onWheel?: React.WheelEventHandler<HTMLCanvasElement>
 }) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const device = useGPUDevice();
+  const device = GpuUtil.useGPUDevice();
 
   React.useEffect(() => {
     if(canvasRef.current && device) {
@@ -206,7 +180,7 @@ function WebGPURenderCanvas(props: {
 }
 
 function App() {
-  const device = useGPUDevice();
+  const device = GpuUtil.useGPUDevice();
   React.useEffect(() => {
     if (device) helloComputePipeline(device).then(array => console.log(array));
   }, [device]);
@@ -240,38 +214,19 @@ function App() {
 
   // ---------------
 
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  // const device = useGPUDevice();
-  const context = React.useMemo(() => {
-    if(canvasRef.current && device) {
-      // const context = canvasRef.current.getContext('webgpu') as GPUCanvasContext;
-      const context = canvasRef.current.getContext('webgpu');
-      context?.configure({
-        device,
-        format: navigator.gpu.getPreferredCanvasFormat(),
-        alphaMode: "opaque"
-      });
-      return context;
-    }
-  }, [canvasRef, device]);
+  const [context, canvasRef] = GpuUtil.useGPUCanvasContext(device);
+  const renderMandelbrot = useMandelbrotRenderer(device, context);
 
-  const [renderer, setRenderer] = React.useState<(scale:number, x:number, y:number) => void>();
-  React.useEffect(() => {
-    if(context && device) {
-      setRenderer(() => createRectangleRenderer(device, context));
-    }
-  }, [device, context]);
- 
   type Pos = { x: number, y: number }
 
   const [scale, setScale] = React.useState(3.0);
   const [xy, setXy] = React.useState<Pos>({ x: 0.0, y: 0.0 });
   React.useEffect(() => {
-    if (renderer) {
-      const id = setInterval(() => renderer(scale, xy.x, xy.y), 20);
+    if (renderMandelbrot) {
+      const id = setInterval(() => renderMandelbrot(scale, xy.x, xy.y), 20);
       return () => clearInterval(id);
     }
-  }, [scale, xy, renderer])
+  }, [scale, xy, renderMandelbrot])
 
   const [mouseDown, setMouseDown] = React.useState<[Pos, Pos]>();
 
