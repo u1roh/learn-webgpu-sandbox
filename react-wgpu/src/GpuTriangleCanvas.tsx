@@ -60,13 +60,15 @@ function createRotatingTriangleRenderer(device: GPUDevice, context: GPUCanvasCon
 
 
 function useRotatingTriangleRenderer(device: GPUDevice | undefined, context: GPUCanvasContext | undefined) {
-  const [renderer, setRenderer] = React.useState<(scale:number, x:number, y:number) => void>();
+  const [renderer, setRenderer] = React.useState<{ f: () => void }>({ f: () => {} });
   React.useEffect(() => {
     if(context && device) {
-      setRenderer(() => createRotatingTriangleRenderer(device, context));
+      setRenderer({ f: createRotatingTriangleRenderer(device, context) });
+    } else {
+      setRenderer({ f: () => {} });
     }
   }, [device, context]);
-  return renderer;
+  return renderer.f;
 }
 
 export function GpuTriangleCanvas() {
@@ -74,12 +76,7 @@ export function GpuTriangleCanvas() {
   const [context, canvasRef] = GpuUtil.useGPUCanvasContext(device);
   const render = useRotatingTriangleRenderer(device, context);
 
-  React.useEffect(() => {
-    if (render) {
-      const id = setInterval(render, 20);
-      return () => clearInterval(id);
-    }
-  }, [render]);
+  GpuUtil.useAnimationFrame(render);
 
   return <canvas ref={canvasRef} width={600} height={600}/>;
 }

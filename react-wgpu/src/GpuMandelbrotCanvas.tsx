@@ -1,6 +1,6 @@
 import React from 'react';
-import { createMandelbrotTexture } from './createMandelbrotTexture';
 import * as GpuUtil from './GpuUtil';
+import { createMandelbrotTexture } from './createMandelbrotTexture';
 import { createScreenRectRenderer } from './createScreenRectRenderer';
 
 function createMandelbrotRenderer(device: GPUDevice, context: GPUCanvasContext) {
@@ -28,13 +28,15 @@ function createMandelbrotRenderer(device: GPUDevice, context: GPUCanvasContext) 
 }
 
 function useMandelbrotRenderer(device: GPUDevice | undefined, context: GPUCanvasContext | undefined) {
-  const [renderer, setRenderer] = React.useState<(scale:number, x:number, y:number) => void>();
+  const [renderer, setRenderer] = React.useState<{ f: (scale:number, x:number, y:number) => void }>({ f: () => {} });
   React.useEffect(() => {
     if(context && device) {
-      setRenderer(() => createMandelbrotRenderer(device, context));
+      setRenderer({ f: createMandelbrotRenderer(device, context) });
+    } else {
+      setRenderer({ f: () => {} });
     }
   }, [device, context]);
-  return renderer;
+  return renderer.f;
 }
 
 export function GpuMandelbrotCanvas() {
@@ -47,12 +49,12 @@ export function GpuMandelbrotCanvas() {
 
   const [scale, setScale] = React.useState(3.0);
   const [xy, setXy] = React.useState<Pos>({ x: 0.0, y: 0.0 });
-  React.useEffect(() => {
-    if (renderMandelbrot) {
-      const id = setInterval(() => renderMandelbrot(scale, xy.x, xy.y), 20);
-      return () => clearInterval(id);
-    }
-  }, [scale, xy, renderMandelbrot])
+
+  const callback = React.useCallback(() => {
+    renderMandelbrot(scale, xy.x, xy.y);
+  }, [scale, xy, renderMandelbrot]);
+
+  GpuUtil.useAnimationFrame(callback);
 
   const [mouseDown, setMouseDown] = React.useState<[Pos, Pos]>();
 

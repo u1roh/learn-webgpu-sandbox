@@ -73,3 +73,23 @@ export function useGPUCanvasContext(device: GPUDevice | undefined): [GPUCanvasCo
   }, [canvasRef, device]);
   return [context, canvasRef];
 }
+
+export function useAnimationFrame(callback: () => void) {
+  const requestRef = React.useRef<ReturnType<typeof requestAnimationFrame>>();
+
+  // callback関数に変更があった場合のみanimateを再生成する
+  const animation = React.useCallback(() => {
+    callback();
+    requestRef.current = requestAnimationFrame(animation);
+  }, [callback]);
+
+  // callback関数に変更があった場合は一度破棄して再度呼び出す
+  React.useEffect(() => {
+    requestRef.current = requestAnimationFrame(animation);
+    return () => {
+      if (requestRef.current) {
+        return cancelAnimationFrame(requestRef.current);
+      }
+    };
+  }, [animation]);
+};
